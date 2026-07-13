@@ -1,5 +1,6 @@
 package com.github.micycle1.robustpredicates.expr;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,13 +22,28 @@ import java.util.Map;
  * (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
  * }</pre>
  *
+ * <p>Two built-in functions expand common determinant patterns so predicates
+ * read the way they appear in the literature. They are macros — expanded at
+ * parse time into ordinary nodes, with a single fixed operation order and no
+ * new node kinds:
+ * <ul>
+ *   <li>{@code det2(a, b, c, d)} → {@code a*d - b*c}, the determinant of the
+ *       matrix {@code [[a, b], [c, d]]};</li>
+ *   <li>{@code sumSq(x, y)} → {@code x*x + y*y}, and
+ *       {@code sumSq(x, y, z)} → {@code (x*x + y*y) + z*z} (left-associative).</li>
+ * </ul>
+ * Arguments may themselves be arbitrary expressions, and each occurrence
+ * composes from the same interned nodes, so a {@code sumSq} square reuses the
+ * identical operand ({@code product(x, x)}), preserving square detection.
+ *
  * <p>The parse is literal: {@code +} and {@code -} associate to the left,
- * {@code *} binds tighter, and no algebraic simplification or reassociation of
- * any kind is performed. This matters — the exact operation order of a
- * predicate expression is semantically load-bearing for the derived error
- * bounds and for the structure of the exact stages, and a binding used twice
- * refers to the identical (interned) subexpression, which downstream analyses
- * rely on (e.g. square detection).
+ * {@code *} binds tighter, the two functions expand to their fixed forms, and
+ * no algebraic simplification or reassociation of any kind is performed. This
+ * matters — the exact operation order of a predicate expression is
+ * semantically load-bearing for the derived error bounds and for the structure
+ * of the exact stages, and a binding used twice refers to the identical
+ * (interned) subexpression, which downstream analyses rely on (e.g. square
+ * detection).
  */
 public final class ExpressionParser {
 
@@ -150,6 +166,9 @@ public final class ExpressionParser {
         }
         if (Character.isJavaIdentifierStart(c)) {
             String name = cursor.identifier();
+            if (!cursor.atEnd() && cursor.peek() == '(') {
+                return call(name, arguments(cursor, scope), cursor);
+            }
             Expression bound = scope.get(name);
             if (bound == null) {
                 throw cursor.error("unknown identifier: " + name);
@@ -157,6 +176,52 @@ public final class ExpressionParser {
             return bound;
         }
         throw cursor.error("unexpected character: '" + c + "'");
+    }
+
+    /** Parses {@code '(' expr (',' expr)* ')'} into an argument list. */
+    private static List<Expression> arguments(Cursor cursor, Map<String, Expression> scope) {
+        cursor.consume('(');
+        List<Expression> args = new ArrayList<>();
+        args.add(additive(cursor, scope));
+        cursor.skipWhitespace();
+        while (cursor.consume(',')) {
+            args.add(additive(cursor, scope));
+            cursor.skipWhitespace();
+        }
+        if (!cursor.consume(')')) {
+            throw cursor.error("expected ',' or ')' in argument list");
+        }
+        return args;
+    }
+
+    /** Expands a built-in function call into its fixed-order expression. */
+    private static Expression call(String name, List<Expression> args, Cursor cursor) {
+        switch (name) {
+            case "det2":
+                if (args.size() != 4) {
+                    throw cursor.error("det2 takes 4 arguments, got " + args.size());
+                }
+                // |a b; c d| = a*d - b*c
+                return Expression.diff(
+                        Expression.product(args.get(0), args.get(3)),
+                        Expression.product(args.get(1), args.get(2)));
+            case "sumSq":
+                if (args.size() == 2) {
+                    return Expression.sum(square(args.get(0)), square(args.get(1)));
+                }
+                if (args.size() == 3) {
+                    return Expression.sum(
+                            Expression.sum(square(args.get(0)), square(args.get(1))),
+                            square(args.get(2)));
+                }
+                throw cursor.error("sumSq takes 2 or 3 arguments, got " + args.size());
+            default:
+                throw cursor.error("unknown function: " + name);
+        }
+    }
+
+    private static Expression square(Expression e) {
+        return Expression.product(e, e);
     }
 
     private static final class Cursor {

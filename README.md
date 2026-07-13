@@ -93,20 +93,42 @@ Two interchangeable back ends produce bit-for-bit identical results:
 ## Defining a new predicate
 
 Predicates are written as plain text — named intermediate bindings followed by
-a final result expression — together with their parameter names:
+a final result expression — together with their parameter names. Expressions
+use `+`, `-`, `*` and parentheses; identifiers refer to parameters or earlier
+bindings. Two built-in helpers expand the determinant patterns that recur in
+geometric predicates, as fixed-order macros:
+
+| Helper | Expands to |
+|---|---|
+| `det2(a, b, c, d)` | `a*d - b*c` (the determinant of `[[a, b], [c, d]]`) |
+| `sumSq(x, y)` | `x*x + y*y` |
+| `sumSq(x, y, z)` | `(x*x + y*y) + z*z` |
+
+For example, `incircle` — a lifted 3×3 determinant — reads as:
 
 ```java
-PredicateSpec spec = new PredicateSpec("diametralCircle2d",
-        List.of("ax", "ay", "bx", "by", "px", "py"),
+PredicateSpec spec = new PredicateSpec("incircle",
+        List.of("ax", "ay", "bx", "by", "cx", "cy", "dx", "dy"),
         """
-        apx = ax - px
-        apy = ay - py
-        bpx = bx - px
-        bpy = by - py
-        apx * bpx + apy * bpy
+        adx = ax - dx
+        ady = ay - dy
+        bdx = bx - dx
+        bdy = by - dy
+        cdx = cx - dx
+        cdy = cy - dy
+        alift = sumSq(adx, ady)
+        blift = sumSq(bdx, bdy)
+        clift = sumSq(cdx, cdy)
+        bcdet = det2(bdx, bdy, cdx, cdy)
+        acdet = det2(adx, ady, cdx, cdy)
+        abdet = det2(adx, ady, bdx, bdy)
+        alift * bcdet - blift * acdet + clift * abdet
         """,
-        "Negative iff {@code p} lies inside the circle with diameter {@code ab}.");
+        "Positive iff {@code d} lies inside the circle through {@code a, b, c}.");
 ```
+
+The written operation order — including the argument order chosen for each
+`det2`/`sumSq` — is preserved exactly; nothing is algebraically rewritten.
 
 From a spec you can immediately run an interpreted chain:
 

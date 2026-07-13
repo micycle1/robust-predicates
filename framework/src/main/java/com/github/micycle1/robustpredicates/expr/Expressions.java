@@ -60,9 +60,9 @@ public final class Expressions {
             cdx = cx - dx
             cdy = cy - dy
             cdz = cz - dz
-            ab = adx * bdy - bdx * ady
-            ac = adx * cdy - cdx * ady
-            bc = bdx * cdy - cdx * bdy
+            ab = det2(adx, bdx, ady, bdy)
+            ac = det2(adx, cdx, ady, cdy)
+            bc = det2(bdx, cdx, bdy, cdy)
             ab * cdz - ac * bdz + bc * adz
             """,
             "Positive iff {@code d} lies below the plane through {@code a, b, c},"
@@ -78,12 +78,12 @@ public final class Expressions {
             bdy = by - dy
             cdx = cx - dx
             cdy = cy - dy
-            alift = adx * adx + ady * ady
-            blift = bdx * bdx + bdy * bdy
-            clift = cdx * cdx + cdy * cdy
-            bcdet = bdx * cdy - bdy * cdx
-            acdet = adx * cdy - ady * cdx
-            abdet = adx * bdy - ady * bdx
+            alift = sumSq(adx, ady)
+            blift = sumSq(bdx, bdy)
+            clift = sumSq(cdx, cdy)
+            bcdet = det2(bdx, bdy, cdx, cdy)
+            acdet = det2(adx, ady, cdx, cdy)
+            abdet = det2(adx, ady, bdx, bdy)
             alift * bcdet - blift * acdet + clift * abdet
             """,
             "Positive iff {@code d} lies inside the circle through"
@@ -97,25 +97,25 @@ public final class Expressions {
             aex = ax - ex
             aey = ay - ey
             aez = az - ez
-            alift = aex * aex + aey * aey + aez * aez
+            alift = sumSq(aex, aey, aez)
             bex = bx - ex
             bey = by - ey
             bez = bz - ez
-            blift = bex * bex + bey * bey + bez * bez
+            blift = sumSq(bex, bey, bez)
             cex = cx - ex
             cey = cy - ey
             cez = cz - ez
-            clift = cex * cex + cey * cey + cez * cez
+            clift = sumSq(cex, cey, cez)
             dex = dx - ex
             dey = dy - ey
             dez = dz - ez
-            dlift = dex * dex + dey * dey + dez * dez
-            ab = bex * aey - aex * bey
-            ac = cex * aey - aex * cey
-            ad = dex * aey - aex * dey
-            bc = cex * bey - bex * cey
-            bd = dex * bey - bex * dey
-            cd = dex * cey - cex * dey
+            dlift = sumSq(dex, dey, dez)
+            ab = det2(bex, aex, bey, aey)
+            ac = det2(cex, aex, cey, aey)
+            ad = det2(dex, aex, dey, aey)
+            bc = det2(cex, bex, cey, bey)
+            bd = det2(dex, bex, dey, bey)
+            cd = det2(dex, cex, dey, cey)
             abc = bc * aez - ac * bez + ab * cez
             abd = bd * aez - ad * bez + ab * dez
             acd = cd * aez - ad * cez + ac * dez

@@ -46,6 +46,51 @@ class ExpressionParserTest {
     }
 
     @Test
+    void det2ExpandsToCrossDifferenceInOrder() {
+        List<String> params = List.of("a", "b", "c", "d");
+        // det2(a, b, c, d) = a*d - b*c, with exact operand order.
+        assertSame(diff(product(arg(1), arg(4)), product(arg(2), arg(3))),
+                ExpressionParser.parse("det2(a, b, c, d)", params));
+    }
+
+    @Test
+    void sumSqExpandsLeftAssociatively() {
+        List<String> params = List.of("x", "y", "z");
+        assertSame(sum(product(arg(1), arg(1)), product(arg(2), arg(2))),
+                ExpressionParser.parse("sumSq(x, y)", params));
+        assertSame(sum(sum(product(arg(1), arg(1)), product(arg(2), arg(2))),
+                        product(arg(3), arg(3))),
+                ExpressionParser.parse("sumSq(x, y, z)", params));
+        // A square reuses the identical interned operand (square detection).
+        Expression e = ExpressionParser.parse("sumSq(x, y)", params);
+        assertSame(e.left().left(), e.left().right());
+    }
+
+    @Test
+    void functionArgumentsMayBeExpressions() {
+        List<String> params = List.of("a", "b", "c");
+        // det2(a - b, c, c, a + b) = (a-b)*(a+b) - c*c.
+        assertSame(diff(product(diff(arg(1), arg(2)), sum(arg(1), arg(2))),
+                        product(arg(3), arg(3))),
+                ExpressionParser.parse("det2(a - b, c, c, a + b)", params));
+    }
+
+    @Test
+    void rejectsBadFunctionCalls() {
+        List<String> params = List.of("a", "b", "c", "d");
+        assertThrows(IllegalArgumentException.class,
+                () -> ExpressionParser.parse("det2(a, b, c)", params));       // wrong arity
+        assertThrows(IllegalArgumentException.class,
+                () -> ExpressionParser.parse("sumSq(a)", params));            // wrong arity
+        assertThrows(IllegalArgumentException.class,
+                () -> ExpressionParser.parse("cross(a, b, c, d)", params));   // unknown function
+        assertThrows(IllegalArgumentException.class,
+                () -> ExpressionParser.parse("det2(a, b, c d)", params));     // missing comma
+        assertThrows(IllegalArgumentException.class,
+                () -> ExpressionParser.parse("det2(a, b, c, d", params));     // unclosed
+    }
+
+    @Test
     void rejectsMalformedBodies() {
         List<String> params = List.of("a", "b");
         assertThrows(IllegalArgumentException.class,
