@@ -73,6 +73,10 @@ Only uncertain inputs proceed to the next stage. The final stage is exact and al
 
 The generated implementation is straight-line Java code with its derived error-bound constants embedded directly in the source.
 
+## Benchmarks
+
+JMH micro-benchmarks compare these predicates against the equivalent robust predicates in [JTS](https://github.com/locationtech/jts) and [ProGAL](https://github.com/Bio7/ProGAL). See [predicates/BENCHMARKS.md](predicates/BENCHMARKS.md) for methodology, results, and how to run them.
+
 ## Defining a predicate
 
 Predicates are written as simple expressions with optional named intermediate values.
