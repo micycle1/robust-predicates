@@ -1,186 +1,140 @@
 # Robust Predicates
 
-A code-generation framework for **adaptive exact geometric predicates** — and
-the generated predicates themselves.
+A Java framework for generating **adaptive exact geometric predicates**.
 
-A geometric predicate (`orient2d`, `incircle`, `insphere`, ...) is the sign of
-a polynomial in point coordinates. Evaluated naively in floating point, the
-sign can come out wrong near degeneracy, which breaks algorithms built on it
-(Delaunay triangulation, convex hulls, mesh generation). The predicates here
-**always return the exact sign**, and are *adaptive*: a fast floating-point
-filter answers almost every call, and exact arithmetic runs only when the
-input is too close to degenerate for the filter to certify.
+This project implements the approach described in [*Fast Floating-Point Filters for Robust Predicates*](https://doi.org/10.1007/s10543-023-00975-x): predicates are evaluated first with fast floating-point filters, then fall back to expansion arithmetic only when the sign cannot be certified.
 
-Unlike hand-written adaptive predicates, everything is derived automatically
-from the predicate's expression tree: the forward error bound of the filter,
-the exact expansion-arithmetic stages, and the final straight-line Java code.
-Write a new predicate as a formula; get a robust adaptive routine out. The
-derived error bounds are as tight as — and sometimes slightly tighter than —
-the classic hand-derived ones (for `orient2d` the derived filter constant is
-`3u − 94906236u²` with `u = 2⁻⁵³`, just below Shewchuk's classic `3u`), so the
-filter certifies at least as many calls.
+The generated predicates return the exact sign of their defining expression:
 
-## Modules
+- `1` — positive
+- `0` — exactly zero
+- `-1` — negative
 
-| Module | Artifact | Contents |
-|---|---|---|
-| `predicates` | `robust-predicates` | The generated predicates (`RobustPredicates`) and the expansion arithmetic they run on. Dependency-free — this is the only artifact needed to *use* the predicates. |
-| `framework` | `robust-predicates-framework` | The machinery that produces them: expression trees, error-bound derivation, filters, exact stages, interpreted predicate chains, and the code generator. Only needed to *define* new predicates. |
+This is useful for geometric algorithms such as Delaunay triangulation, convex hull construction, and mesh generation, where an incorrect sign near a degeneracy can cause failures.
 
-## Using the predicates
+## What this repository contains
+
+The repository has two Maven modules.
+
+`predicates` is the dependency-free runtime library. It contains the generated `RobustPredicates` class and its expansion-arithmetic support code. This is the only module needed when using the predicates in an application.
+
+`framework` is the predicate-generation framework. It parses predicate expressions, derives floating-point error bounds, builds exact expansion-arithmetic fallbacks, and generates the flat Java routines included in `predicates`. Use it when defining or modifying predicates.
+
+## Included predicates
+
+The generated `RobustPredicates` class currently provides:
+
+- `orient2d`
+- `orient3d`
+- `incircle`
+- `insphere`
+- `diametralCircle2d`
 
 ```java
 import com.github.micycle1.robustpredicates.RobustPredicates;
 
-int o = RobustPredicates.orient2d(ax, ay, bx, by, cx, cy);            // 1, 0, -1
-int i = RobustPredicates.incircle(ax, ay, bx, by, cx, cy, dx, dy);
-int s = RobustPredicates.insphere(ax, ay, az, /* b, c, d */ ..., ex, ey, ez);
+int orientation = RobustPredicates.orient2d(ax, ay, bx, by, cx, cy);
+int circle = RobustPredicates.incircle(ax, ay, bx, by, cx, cy, dx, dy);
+int sphere = RobustPredicates.insphere(
+    ax, ay, az,
+    bx, by, bz,
+    cx, cy, cz,
+    dx, dy, dz,
+    ex, ey, ez
+);
 ```
 
-Sign conventions follow Shewchuk's widely used `predicates.c`:
+Sign conventions follow Shewchuk's `predicates.c` conventions:
 
-| Predicate | Positive when |
-|---|---|
-| `orient2d(a, b, c)` | `c` is to the left of the directed line `a → b` (triangle `abc` winds counterclockwise); zero iff collinear. |
-| `orient3d(a, b, c, d)` | `d` is below the plane through `a, b, c`, where "below" means `a, b, c` appear counterclockwise viewed from above; zero iff coplanar. |
-| `incircle(a, b, c, d)` | `d` is inside the circle through counterclockwise `a, b, c`; zero iff cocircular. |
-| `insphere(a, b, c, d, e)` | `e` is inside the sphere through `a, b, c, d` when `orient3d(a, b, c, d)` is positive; zero iff cospherical. |
-| `diametralCircle2d(a, b, p)` | negative iff `p` is inside the circle with diameter `ab`; zero on the circle. |
+- `orient2d(a, b, c)` is positive when `c` is to the left of the directed line `a → b`; zero means the points are collinear.
+- `orient3d(a, b, c, d)` is positive when `d` lies below the oriented plane through `a`, `b`, and `c`; zero means the points are coplanar.
+- `incircle(a, b, c, d)` is positive when `d` lies inside the circumcircle of counterclockwise `a`, `b`, and `c`; zero means cocircular.
+- `insphere(a, b, c, d, e)` is positive when `e` lies inside the sphere through `a`, `b`, `c`, and `d`, provided `orient3d(a, b, c, d)` is positive; zero means cospherical.
+- `diametralCircle2d(a, b, p)` is negative when `p` lies inside the circle with diameter `ab`; zero means `p` lies on that circle.
 
-**Y-axis direction.** The 2D descriptions assume the usual mathematical
-orientation with the y axis pointing **up**. With screen coordinates (y
-pointing down) the geometric reading flips: positive `orient2d` then means
-`c` is to the *right* of `a → b` and the winding reads as clockwise. The
-algebraic signs and exactness guarantees are unaffected.
-
-**Domain.** Like Shewchuk's routines, the exact stages assume no intermediate
-product overflows or underflows; coordinates in the denormal range are outside
-the supported domain. The stage-A filter itself carries underflow guards and
-stays sound everywhere.
+The 2D descriptions assume a conventional coordinate system with the y-axis pointing upward. For screen coordinates, where y increases downward, the geometric interpretation of positive and negative orientation is reversed.
 
 ## How it works
 
-Each predicate is one expression tree, from which three stages are derived and
-chained; a stage returns `SIGN_UNCERTAIN` when it cannot certify the sign, and
-only then does the next (more expensive) stage run:
+Each predicate is defined as an expression tree. From that expression, the framework derives a staged evaluator:
 
-1. **Stage A — floating-point filter.** Evaluates the expression plus an
-   automatically derived error bound of the form
-   `constant * magnitude(inputs)`. The constant comes from an eps-polynomial
-   analysis of the expression's rounding errors (including a lemma of Ozaki
-   et al. for products of differences, and merged underflow-guard terms).
-2. **Stage B — exact-difference expansions.** Assumes the leaf coordinate
-   differences are exact (verifying their rounding tails, deferring if any is
-   nonzero), which permits much smaller expansions.
-3. **Stage D — full expansion arithmetic.** Shewchuk-style exact expansion
-   evaluation (TwoSum/TwoDiff tails, FMA TwoProduct, grow / expansion-sum /
-   fast-expansion-sum / scale / divide-and-conquer product). Exact; never
-   uncertain.
+1. **Floating-point filter**  
+   Evaluates the expression in `double` arithmetic and compares the result with an automatically derived forward error bound. Most inputs are resolved here.
 
-The written operation order of an expression is load-bearing — the error
-bound and the exactness structure depend on it — so expressions are never
-algebraically rewritten or reassociated.
+2. **Exact-difference expansion stage**  
+   Handles cases where coordinate differences are exactly representable, using smaller expansions.
 
-Two interchangeable back ends produce bit-for-bit identical results:
+3. **Full expansion-arithmetic stage**  
+   Uses Shewchuk-style floating-point expansions to determine the exact sign.
 
-- **Generated** (`RobustPredicates`, recommended): flat straight-line Java
-  emitted by the code generator, with the derived error-bound constants baked
-  in as hex literals.
-- **Interpreted** (`RobustPredicatesInterpreted` in the framework): the same
-  staged chains executed directly over the expression tree — no codegen step,
-  useful while developing a new predicate.
+Only uncertain inputs proceed to the next stage. The final stage is exact and always returns `-1`, `0`, or `1`.
 
-## Defining a new predicate
+The generated implementation is straight-line Java code with its derived error-bound constants embedded directly in the source.
 
-Predicates are written as plain text — named intermediate bindings followed by
-a final result expression — together with their parameter names. Expressions
-use `+`, `-`, `*` and parentheses; identifiers refer to parameters or earlier
-bindings. Two built-in helpers expand the determinant patterns that recur in
-geometric predicates, as fixed-order macros:
+## Defining a predicate
 
-| Helper | Expands to |
-|---|---|
-| `det2(a, b, c, d)` | `a*d - b*c` (the determinant of `[[a, b], [c, d]]`) |
-| `sumSq(x, y)` | `x*x + y*y` |
-| `sumSq(x, y, z)` | `(x*x + y*y) + z*z` |
-
-For example, `incircle` — a lifted 3×3 determinant — reads as:
+Predicates are written as simple expressions with optional named intermediate values.
 
 ```java
-PredicateSpec spec = new PredicateSpec("incircle",
-        List.of("ax", "ay", "bx", "by", "cx", "cy", "dx", "dy"),
-        """
-        adx = ax - dx
-        ady = ay - dy
-        bdx = bx - dx
-        bdy = by - dy
-        cdx = cx - dx
-        cdy = cy - dy
-        alift = sumSq(adx, ady)
-        blift = sumSq(bdx, bdy)
-        clift = sumSq(cdx, cdy)
-        bcdet = det2(bdx, bdy, cdx, cdy)
-        acdet = det2(adx, ady, cdx, cdy)
-        abdet = det2(adx, ady, bdx, bdy)
-        alift * bcdet - blift * acdet + clift * abdet
-        """,
-        "Positive iff {@code d} lies inside the circle through {@code a, b, c}.");
+PredicateSpec spec = new PredicateSpec(
+    "incircle",
+    List.of("ax", "ay", "bx", "by", "cx", "cy", "dx", "dy"),
+    """
+    adx = ax - dx
+    ady = ay - dy
+    bdx = bx - dx
+    bdy = by - dy
+    cdx = cx - dx
+    cdy = cy - dy
+    alift = sumSq(adx, ady)
+    blift = sumSq(bdx, bdy)
+    clift = sumSq(cdx, cdy)
+    bcdet = det2(bdx, bdy, cdx, cdy)
+    acdet = det2(adx, ady, cdx, cdy)
+    abdet = det2(adx, ady, bdx, bdy)
+    alift * bcdet - blift * acdet + clift * abdet
+    """,
+    "Positive iff d lies inside the circumcircle through a, b, and c."
+);
 ```
 
-The written operation order — including the argument order chosen for each
-`det2`/`sumSq` — is preserved exactly; nothing is algebraically rewritten.
+Expressions support `+`, `-`, `*`, and parentheses. Two helpers are also available:
 
-From a spec you can immediately run an interpreted chain:
+- `det2(a, b, c, d)` expands to `a * d - b * c`
+- `sumSq(x, y)` expands to `x * x + y * y`
+- `sumSq(x, y, z)` expands to `(x * x + y * y) + z * z`
 
-```java
-Expression e = spec.expression();
-StagedPredicate p = new StagedPredicate(
-        new SemiStaticFilter(e), new StageB(e), new StageD(e));
-int sign = p.apply(new double[] {ax, ay, bx, by, px, py});
-```
+The written operation order is preserved. Expressions are not algebraically simplified or reassociated, because evaluation order affects both the derived error bound and the exact fallback structure.
 
-or add it to `Expressions.SPECS` and regenerate the flat routines:
+Add a specification to `Expressions.SPECS`, then regenerate the runtime predicates:
 
 ```sh
 mvn -Pcodegen -pl framework -am process-classes
 ```
 
-The generated file is checked in; a drift test fails the build if it goes
-stale.
+This writes the generated `RobustPredicates.java` file into the `predicates` module.
 
-### Static filters
+## Static filters
 
-For batch or incremental algorithms whose coordinates have known bounds, the
-framework also derives **static** filters: the error bound is computed once
-from global per-coordinate extrema (`StaticFilter`), or maintained
-incrementally as inputs arrive (`AlmostStaticFilter`), making the per-call
-filter just an evaluate-and-compare.
+The framework also supports static filters for algorithms with known coordinate bounds.
 
-## Building and testing
+A `StaticFilter` computes one error bound for a known coordinate domain. An `AlmostStaticFilter` maintains coordinate extrema incrementally and refreshes that bound as needed. These filters can reduce per-call work in batch or incremental geometric algorithms.
+
+## Building
 
 ```sh
-mvn test                                     # full suite
-mvn -Pcodegen -pl framework -am process-classes   # regenerate RobustPredicates.java
+mvn test
 ```
 
-Verification includes: exactness of every expansion primitive against
-BigDecimal; the exact stages against an independent unlimited-precision oracle
-on random, exactly degenerate (collinear / cocircular / coplanar /
-cospherical) and ulp-perturbed near-degenerate inputs; empirical soundness of
-the derived error bounds (`|approx − exact| ≤ bound`); a Kettner-style
-ulp-grid sign map; identity of the parsed expression trees with hand-built
-references; and per-stage bit-for-bit agreement between the interpreted and
-generated code.
+Regenerate the checked-in predicate source:
 
-## Design notes
+```sh
+mvn -Pcodegen -pl framework -am process-classes
+```
 
-- All arithmetic is `double`; `Math.fma` supplies the exact product tail.
-- Each stage recomputes from the raw arguments; Shewchuk-style reuse of a
-  stage's partial results by the next stage is future work.
-- The expression trees are interned, so structurally equal subexpressions are
-  the same object; the filter evaluates subexpressions shared between the
-  predicate and its error bound only once.
+## Notes
 
-This project implements, in Java, the predicate-generation approach of
-*Fast Floating-Point Filters for Robust Predicates* (see the parent
-repository).
+- All arithmetic uses `double`.
+- `Math.fma` is used to compute exact product tails where available.
+- Exact fallback stages assume intermediate products do not overflow or underflow, matching the domain restrictions of Shewchuk-style expansion predicates.
+- The stage-A floating-point filter includes underflow protection and remains sound outside that narrower exact-expansion domain.
