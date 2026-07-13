@@ -5,18 +5,22 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.github.micycle1</groupId>
-  <artifactId>generic-robust-predicates</artifactId>
+  <artifactId>robust-predicates-parent</artifactId>
   <version>0.1.0-SNAPSHOT</version>
-  <packaging>jar</packaging>
+  <packaging>pom</packaging>
 
-  <name>Generic Robust Predicates (Java)</name>
+  <name>Robust Predicates (parent)</name>
   <description>
-    Java port of the "Fast Floating-Point Filters for Robust Predicates" framework:
-    compile-time-style expression trees evaluated at construction time, automatic
-    forward error-bound derivation, semi-static/static filters, exact
-    expansion-arithmetic stages, and a code generator emitting Shewchuk-like
-    adaptive robust predicate routines.
+    A code-generation framework for adaptive exact geometric predicates:
+    expression trees with automatic forward error-bound derivation,
+    floating-point filters, exact expansion-arithmetic stages, and a generator
+    that emits self-contained adaptive predicate routines.
   </description>
+
+  <modules>
+    <module>predicates</module>
+    <module>framework</module>
+  </modules>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
@@ -24,42 +28,26 @@
     <junit.version>5.10.2</junit.version>
   </properties>
 
-  <dependencies>
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <version>${junit.version}</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${junit.version}</version>
+        <scope>test</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.2.5</version>
-      </plugin>
-    </plugins>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.2.5</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
   </build>
-
-  <profiles>
-    <!-- Regenerates src/main/java/com/github/micycle1/robustpredicates/generated/RobustPredicates.java:
-         mvn -Pcodegen compile exec:java -->
-    <profile>
-      <id>codegen</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.codehaus.mojo</groupId>
-            <artifactId>exec-maven-plugin</artifactId>
-            <version>3.2.0</version>
-            <configuration>
-              <mainClass>com.github.micycle1.robustpredicates.codegen.GenerateMain</mainClass>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-  </profiles>
 </project>

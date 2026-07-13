@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.github.micycle1</groupId>
+    <artifactId>robust-predicates-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>robust-predicates-framework</artifactId>
+  <packaging>jar</packaging>
+
+  <name>Robust Predicates Framework</name>
+  <description>
+    The framework that produces the robust-predicates module: expression
+    trees, automatic forward error-bound derivation, semi-static/static
+    filters, exact expansion-arithmetic stages, interpreted staged predicates,
+    and the code generator.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.github.micycle1</groupId>
+      <artifactId>robust-predicates</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <profiles>
+    <!-- Regenerates predicates/src/main/java/com/github/micycle1/robustpredicates/RobustPredicates.java:
+         mvn -Pcodegen -pl framework -am process-classes (from the repository root) -->
+    <profile>
+      <id>codegen</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <version>3.2.0</version>
+            <executions>
+              <execution>
+                <id>generate-predicates</id>
+                <phase>process-classes</phase>
+                <goals>
+                  <goal>java</goal>
+                </goals>
+                <configuration>
+                  <mainClass>com.github.micycle1.robustpredicates.codegen.GenerateMain</mainClass>
+                  <arguments>
+                    <argument>${project.basedir}/../predicates/src/main/java</argument>
+                  </arguments>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

@@ -1,113 +1,164 @@
-# Generic Robust Predicates (Java)
+# Robust Predicates
 
-A Java port of the framework from **“Fast Floating-Point Filters for Robust
-Predicates”** (the C++ implementation in the parent repository), whose end
-product is a set of **Shewchuk-like adaptive robust predicate routines**:
-flat static methods `orient2d`, `orient3d`, `incircle`, `insphere` that always
-return the exact sign while paying the cost of exact arithmetic only on
-near-degenerate inputs.
+A code-generation framework for **adaptive exact geometric predicates** — and
+the generated predicates themselves.
 
-## How it maps to the C++ framework
+A geometric predicate (`orient2d`, `incircle`, `insphere`, ...) is the sign of
+a polynomial in point coordinates. Evaluated naively in floating point, the
+sign can come out wrong near degeneracy, which breaks algorithms built on it
+(Delaunay triangulation, convex hulls, mesh generation). The predicates here
+**always return the exact sign**, and are *adaptive*: a fast floating-point
+filter answers almost every call, and exact arithmetic runs only when the
+input is too close to degenerate for the filter to certify.
 
-The C++ version encodes arithmetic expression trees in the type system and
-derives everything at compile time. Java has no equivalent, so:
+Unlike hand-written adaptive predicates, everything is derived automatically
+from the predicate's expression tree: the forward error bound of the filter,
+the exact expansion-arithmetic stages, and the final straight-line Java code.
+Write a new predicate as a formula; get a robust adaptive routine out. The
+derived error bounds are as tight as — and sometimes slightly tighter than —
+the classic hand-derived ones (for `orient2d` the derived filter constant is
+`3u − 94906236u²` with `u = 2⁻⁵³`, just below Shewchuk's classic `3u`), so the
+filter certifies at least as many calls.
 
-| C++ (compile time) | Java (construction time) |
-|---|---|
-| type-level expression trees, `std::is_same` dedup | interned immutable `Expression` nodes (`com.github.micycle1.robustpredicates.expr`) — structural equality *is* reference equality |
-| `mp_unique<post_order<...>>` | `EvaluationPlan` (deduped post-order, one slot per node) |
-| `forward_error_bound.hpp` constexpr rule chain | `ErrorBoundDeriver` (`com.github.micycle1.robustpredicates.errorbound`) run once per predicate |
-| compile-time expansion sizes/offsets | `ExpansionSizes` + per-node offsets in `ExpansionEvaluator` |
-| template-specialized routines | **generated Java source** (`com.github.micycle1.robustpredicates.generated.RobustPredicates`) |
+## Modules
 
-## Pipeline
+| Module | Artifact | Contents |
+|---|---|---|
+| `predicates` | `robust-predicates` | The generated predicates (`RobustPredicates`) and the expansion arithmetic they run on. Dependency-free — this is the only artifact needed to *use* the predicates. |
+| `framework` | `robust-predicates-framework` | The machinery that produces them: expression trees, error-bound derivation, filters, exact stages, interpreted predicate chains, and the code generator. Only needed to *define* new predicates. |
 
-Each predicate is one expression tree (see `com.github.micycle1.robustpredicates.expr.Expressions`; the exact
-operation order is load-bearing and must not be algebraically rewritten) from
-which three stages are derived, chained via the `SIGN_UNCERTAIN = -2`
-protocol (`com.github.micycle1.robustpredicates.filter.StagedPredicate`):
-
-1. **Stage A — semi-static filter** (`SemiStaticFilter`): evaluates the
-   expression plus an automatically derived error bound
-   `constant * magnitude(inputs)`. The constant comes from an eps-polynomial
-   analysis (`EpsCoefficients`, rules ported from `forward_error_bound.hpp`,
-   including the Ozaki lemma 3.1 with `phi = 94906264` and merged
-   underflow-guard terms `count * Double.MIN_NORMAL`). For orient2d the
-   derived constant is `3u - 94906236u²` with `u = 2^-53` — slightly *tighter*
-   than the classic `3u` bound.
-2. **Stage B** (`com.github.micycle1.robustpredicates.expansion.StageB`): assumes all leaf-minus-leaf
-   coordinate differences are exact (checks their rounding tails, deferring if
-   any is nonzero), which permits much smaller expansions.
-3. **Stage D** (`com.github.micycle1.robustpredicates.expansion.StageD`): full Shewchuk expansion arithmetic
-   (`ExpansionArithmetic`: TwoSum/TwoDiff tails, FMA TwoProduct, grow /
-   expansion-sum / fast-expansion-sum / scale / divide-and-conquer product,
-   length-2 square special case). Exact; never uncertain.
-
-Static filters (`StaticFilter`, `AlmostStaticFilter`) are also provided: the
-error bound is precomputed once from global coordinate extrema via the
-interval transform of the magnitude expression (`IntervalTransformer`, extrema
-array layout `[max_1..max_n, min_1..min_n]`).
-
-## Usage
-
-Generated flat routines (recommended; only needs `ExpansionArithmetic` at
-runtime):
+## Using the predicates
 
 ```java
-import com.github.micycle1.robustpredicates.generated.RobustPredicates;
+import com.github.micycle1.robustpredicates.RobustPredicates;
 
-int s = RobustPredicates.orient2d(ax, ay, bx, by, cx, cy);   // 1, 0, -1
+int o = RobustPredicates.orient2d(ax, ay, bx, by, cx, cy);            // 1, 0, -1
 int i = RobustPredicates.incircle(ax, ay, bx, by, cx, cy, dx, dy);
+int s = RobustPredicates.insphere(ax, ay, az, /* b, c, d */ ..., ex, ey, ez);
 ```
 
-Interpreted chains (same results bit for bit, fully dynamic):
+Sign conventions follow Shewchuk's widely used `predicates.c`:
+
+| Predicate | Positive when |
+|---|---|
+| `orient2d(a, b, c)` | `c` is to the left of the directed line `a → b` (triangle `abc` winds counterclockwise); zero iff collinear. |
+| `orient3d(a, b, c, d)` | `d` is below the plane through `a, b, c`, where "below" means `a, b, c` appear counterclockwise viewed from above; zero iff coplanar. |
+| `incircle(a, b, c, d)` | `d` is inside the circle through counterclockwise `a, b, c`; zero iff cocircular. |
+| `insphere(a, b, c, d, e)` | `e` is inside the sphere through `a, b, c, d` when `orient3d(a, b, c, d)` is positive; zero iff cospherical. |
+| `diametralCircle2d(a, b, p)` | negative iff `p` is inside the circle with diameter `ab`; zero on the circle. |
+
+**Y-axis direction.** The 2D descriptions assume the usual mathematical
+orientation with the y axis pointing **up**. With screen coordinates (y
+pointing down) the geometric reading flips: positive `orient2d` then means
+`c` is to the *right* of `a → b` and the winding reads as clockwise. The
+algebraic signs and exactness guarantees are unaffected.
+
+**Domain.** Like Shewchuk's routines, the exact stages assume no intermediate
+product overflows or underflows; coordinates in the denormal range are outside
+the supported domain. The stage-A filter itself carries underflow guards and
+stays sound everywhere.
+
+## How it works
+
+Each predicate is one expression tree, from which three stages are derived and
+chained; a stage returns `SIGN_UNCERTAIN` when it cannot certify the sign, and
+only then does the next (more expensive) stage run:
+
+1. **Stage A — floating-point filter.** Evaluates the expression plus an
+   automatically derived error bound of the form
+   `constant * magnitude(inputs)`. The constant comes from an eps-polynomial
+   analysis of the expression's rounding errors (including a lemma of Ozaki
+   et al. for products of differences, and merged underflow-guard terms).
+2. **Stage B — exact-difference expansions.** Assumes the leaf coordinate
+   differences are exact (verifying their rounding tails, deferring if any is
+   nonzero), which permits much smaller expansions.
+3. **Stage D — full expansion arithmetic.** Shewchuk-style exact expansion
+   evaluation (TwoSum/TwoDiff tails, FMA TwoProduct, grow / expansion-sum /
+   fast-expansion-sum / scale / divide-and-conquer product). Exact; never
+   uncertain.
+
+The written operation order of an expression is load-bearing — the error
+bound and the exactness structure depend on it — so expressions are never
+algebraically rewritten or reassociated.
+
+Two interchangeable back ends produce bit-for-bit identical results:
+
+- **Generated** (`RobustPredicates`, recommended): flat straight-line Java
+  emitted by the code generator, with the derived error-bound constants baked
+  in as hex literals.
+- **Interpreted** (`RobustPredicatesInterpreted` in the framework): the same
+  staged chains executed directly over the expression tree — no codegen step,
+  useful while developing a new predicate.
+
+## Defining a new predicate
+
+Predicates are written as plain text — named intermediate bindings followed by
+a final result expression — together with their parameter names:
 
 ```java
-import com.github.micycle1.robustpredicates.predicates.RobustPredicatesInterpreted;
-
-int s = RobustPredicatesInterpreted.orient2d(ax, ay, bx, by, cx, cy);
+PredicateSpec spec = new PredicateSpec("diametralCircle2d",
+        List.of("ax", "ay", "bx", "by", "px", "py"),
+        """
+        apx = ax - px
+        apy = ay - py
+        bpx = bx - px
+        bpy = by - py
+        apx * bpx + apy * bpy
+        """,
+        "Negative iff {@code p} lies inside the circle with diameter {@code ab}.");
 ```
 
-Sign conventions (documented per method): `orient2d > 0` iff `c` is left of
-`a -> b`; `orient3d` is `sign(det[q-p, r-p, s-p])`; `incircle > 0` iff `d` is
-inside the circle through counterclockwise `a, b, c`; `insphere` follows the
-CGAL `side_of_oriented_sphere_3` row order `p, r, q, s` of the C++ kernel.
+From a spec you can immediately run an interpreted chain:
+
+```java
+Expression e = spec.expression();
+StagedPredicate p = new StagedPredicate(
+        new SemiStaticFilter(e), new StageB(e), new StageD(e));
+int sign = p.apply(new double[] {ax, ay, bx, by, px, py});
+```
+
+or add it to `Expressions.SPECS` and regenerate the flat routines:
+
+```sh
+mvn -Pcodegen -pl framework -am process-classes
+```
+
+The generated file is checked in; a drift test fails the build if it goes
+stale.
+
+### Static filters
+
+For batch or incremental algorithms whose coordinates have known bounds, the
+framework also derives **static** filters: the error bound is computed once
+from global per-coordinate extrema (`StaticFilter`), or maintained
+incrementally as inputs arrive (`AlmostStaticFilter`), making the per-call
+filter just an evaluate-and-compare.
 
 ## Building and testing
 
 ```sh
-mvn test                              # full suite (BigDecimal-exact oracles)
-mvn -Pcodegen compile exec:java       # regenerate com/github/micycle1/generated/RobustPredicates.java
+mvn test                                     # full suite
+mvn -Pcodegen -pl framework -am process-classes   # regenerate RobustPredicates.java
 ```
 
-The generated file is checked in; `CodegenDriftTest` fails if it is stale.
 Verification includes: exactness of every expansion primitive against
-BigDecimal; stage D vs. an independent exact oracle on random, exactly
-degenerate (collinear/cocircular/coplanar/cospherical) and ulp-perturbed
-near-degenerate inputs; empirical soundness of the derived error bounds
-(`|approx - exact| <= bound`); a Kettner-style ulp-grid sign map; the
-notebook's near-cocircular rational example; and per-stage bit-for-bit
-agreement between interpreted and generated code.
+BigDecimal; the exact stages against an independent unlimited-precision oracle
+on random, exactly degenerate (collinear / cocircular / coplanar /
+cospherical) and ulp-perturbed near-degenerate inputs; empirical soundness of
+the derived error bounds (`|approx − exact| ≤ bound`); a Kettner-style
+ulp-grid sign map; identity of the parsed expression trees with hand-built
+references; and per-stage bit-for-bit agreement between the interpreted and
+generated code.
 
-## Design notes and deviations
+## Design notes
 
-- **Staged-independent stages**: as in the C++ framework, each stage
-  recomputes from the raw arguments (no Shewchuk-style reuse of stage-A
-  partial results). True cross-stage adaptivity is future work.
-- **Domain restriction**: like Shewchuk's `predicates.c`, stages B/D are
-  exact only when no intermediate product over- or underflows; coordinates in
-  the denormal range are outside the supported domain. Stage A's underflow
-  guards keep the *filter* sound everywhere.
-- `double`-only (the C++ `CalculationType` genericity is dropped);
-  `Math.fma` implements the TwoProduct tail.
-- Zero-elimination policy (`length > 16`) and fast-expansion-sum policy
-  (both operands longer than 2) match the C++ defaults; inside the
-  divide-and-conquer product, policies are evaluated on dynamic rather than
-  static lengths (value-preserving either way).
-- The sign of an expansion is read from its last nonzero component instead of
-  the C++ `MostSigOnly` accumulation mode (equivalent, simpler).
-- The C++ scalar-minus-expansion overload negates the wrong operand
-  (computes `f - e`); it is unreachable for these predicates, and the Java
-  version implements it correctly.
-- Sums/products in error-bound magnitudes share interned subexpressions with
-  the main expression, so stage A evaluates common terms once.
+- All arithmetic is `double`; `Math.fma` supplies the exact product tail.
+- Each stage recomputes from the raw arguments; Shewchuk-style reuse of a
+  stage's partial results by the next stage is future work.
+- The expression trees are interned, so structurally equal subexpressions are
+  the same object; the filter evaluates subexpressions shared between the
+  predicate and its error bound only once.
+
+This project implements, in Java, the predicate-generation approach of
+*Fast Floating-Point Filters for Robust Predicates* (see the parent
+repository).
