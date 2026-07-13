@@ -1,3 +1,5 @@
+[![](https://jitpack.io/v/micycle1/robust-predicates.svg)](https://jitpack.io/#micycle1/robust-predicates)
+
 # Robust Predicates
 
 A Java framework for generating **adaptive exact geometric predicates**.
@@ -130,6 +132,25 @@ Regenerate the checked-in predicate source:
 
 ```sh
 mvn -Pcodegen -pl framework -am process-classes
+```
+
+## Using via JitPack
+
+This repository is published on [JitPack](https://jitpack.io/#micycle1/Fast-Floating-Point-Filters-for-Robust-Predicates). Because it's a multi-module Maven project, add JitPack's repository once, then depend on the single module you need — you don't have to (and shouldn't) pull in the parent POM or the `framework` module unless you're regenerating predicates.
+
+```xml
+<repositories>
+  <repository>
+    <id>jitpack.io</id>
+    <url>https://jitpack.io</url>
+  </repository>
+</repositories>
+
+<dependency>
+  <groupId>com.github.micycle1.Fast-Floating-Point-Filters-for-Robust-Predicates</groupId>
+  <artifactId>robust-predicates</artifactId>
+  <version>x.x</version>
+</dependency>
 ```
 
 ## Notes
